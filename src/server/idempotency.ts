@@ -31,6 +31,12 @@ export interface IdempotencyPort {
   }): Promise<BeginResult>;
   complete(params: { organizationId: string; scope: string; key: string; response: unknown }): Promise<void>;
   fail(params: { organizationId: string; scope: string; key: string }): Promise<void>;
+  /** Read a completed idempotency result (for replay). */
+  get(params: {
+    organizationId: string;
+    scope: string;
+    key: string;
+  }): Promise<unknown | null>;
 }
 
 export const DEFAULT_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
@@ -85,15 +91,48 @@ export class InMemoryIdempotency implements IdempotencyPort {
       this.rows.delete(id);
     }
   }
+
+  async get(params: { organizationId: string; scope: string; key: string }): Promise<unknown | null> {
+    const id = this.id(params);
+    const existing = this.rows.get(id);
+    if (existing && existing.status === 'completed') {
+      return existing.response;
+    }
+    return null;
+  }
 }
 
 /** Canonical request hash (sha256 hex) for replay comparison. */
 export async function requestHash(body: unknown): Promise<string> {
-  const canonical = JSON.stringify(body, Object.keys(body as Record<string, unknown>).sort());
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
+  if (body === undefined) {
+    throw new Error('requestHash: top-level undefined is not a valid payload');
+  }
+  const canonicalize = (value: unknown): unknown => {
+    if (value === null) return null;
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) {
+        throw new Error('requestHash: NaN and Infinity are not valid payload values');
+      }
+      return value;
+    }
+    if (typeof value === 'boolean' || typeof value === 'string') return value;
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (value && typeof value === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+        const v = (value as Record<string, unknown>)[key];
+        if (v === undefined) continue; // undefined == absent (JSON semantics)
+        out[key] = canonicalize(v);
+      }
+      return out;
+    }
+    throw new Error('requestHash: unsupported payload value');
+  };
+  const canonical = JSON.stringify(canonicalize(body));
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
   return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 /** Throw CONFLICT when begin() cannot proceed. */

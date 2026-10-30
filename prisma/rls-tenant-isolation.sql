@@ -240,3 +240,29 @@ CREATE POLICY audit_tenant_insert ON "AuditEvent" FOR INSERT WITH CHECK (
 -- session issuance must work before any tenant context exists; app-gated).
 -- ROLLBACK: DROP each policy above in reverse, then DISABLE RLS per table.
 -- Rolling back removes DB-layer guarantee (app checks remain).
+
+-- Reservation: tenant-scoped, outlet-scoped lifecycle table.
+ALTER TABLE "Reservation" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "Reservation" FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS reservation_tenant_select ON "Reservation";
+CREATE POLICY reservation_tenant_select ON "Reservation" FOR SELECT USING (
+  "organizationId" = current_setting('app.organization_id', false)
+  AND "dataScope" = 'PRODUCTION'
+  AND (current_setting('app.outlet_id', false) = '__none__' OR "outletId" = current_setting('app.outlet_id', false))
+);
+DROP POLICY IF EXISTS reservation_tenant_insert ON "Reservation";
+CREATE POLICY reservation_tenant_insert ON "Reservation" FOR INSERT WITH CHECK (
+  "organizationId" = current_setting('app.organization_id', false)
+  AND "outletId" = current_setting('app.outlet_id', false)
+  AND current_setting('app.outlet_id', false) <> '__none__'
+  AND "dataScope" = 'PRODUCTION'
+);
+DROP POLICY IF EXISTS reservation_tenant_update ON "Reservation";
+CREATE POLICY reservation_tenant_update ON "Reservation" FOR UPDATE USING (
+  "organizationId" = current_setting('app.organization_id', false)
+  AND "dataScope" = 'PRODUCTION'
+) WITH CHECK (
+  "organizationId" = current_setting('app.organization_id', false)
+  AND "dataScope" = 'PRODUCTION'
+);
+-- No DELETE policy: reservations use cancellation lifecycle.

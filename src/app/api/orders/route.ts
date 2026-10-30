@@ -46,12 +46,12 @@ function clientIp(req: Request): string {
 /** Map the authenticated actor onto the UserRecord the service expects. */
 function actorToUser(ctx: AuthContext): UserRecord {
   return {
-    id: ctx.session.sub,
+    id: ctx.actor.userId,
     email: ctx.session.email,
     displayName: ctx.session.email,
-    role: ctx.session.role,
-    tenantId: ctx.session.tenantId,
-    outletIds: ctx.session.outletIds,
+    role: ctx.actor.role,
+    tenantId: ctx.actor.tenantId,
+    outletIds: ctx.actor.outletIds,
     active: true,
     createdAt: new Date(ctx.session.iat * 1000).toISOString(),
   };
@@ -100,7 +100,7 @@ export async function POST(req: Request): Promise<Response> {
 
     authorize(authCtx, "pos:order_create", runtime.audit);
 
-    const rl = rateLimit({ key: `orders:${ctx.session.sub}:${clientIp(req)}`, ...RATE_LIMITS.mutation });
+    const rl = rateLimit({ key: `orders:${authCtx.actor.userId}:${clientIp(req)}`, ...RATE_LIMITS.order_create });
     if (!rl.allowed) {
       return jsonFail(ERROR_CODES.RATE_LIMITED, "Too many requests", 429);
     }
@@ -162,7 +162,7 @@ export async function POST(req: Request): Promise<Response> {
         : await serviceFor(runtime).createOrder({
             tenantId: authCtx.actor.tenantId,
             outletId,
-            actor: actorToUser(ctx),
+            actor: actorToUser(authCtx),
             req: request,
           });
 
@@ -174,11 +174,11 @@ export async function POST(req: Request): Promise<Response> {
         await runtime.audit.record({
           id: createId("aud"),
           action: AUDIT_ACTIONS.ORDER_CREATED,
-          actorId: ctx.session.sub,
-          actorRole: ctx.session.role,
+          actorId: authCtx.actor.userId,
+          actorRole: authCtx.actor.role,
           entityType: "order",
           entityId: order.id,
-          tenantId: ctx.session.tenantId,
+          tenantId: authCtx.actor.tenantId,
           outletId: order.outletId,
           occurredAt: order.createdAt,
           metadata: {
@@ -192,11 +192,15 @@ export async function POST(req: Request): Promise<Response> {
 
       const response = orderCreateResponse(order);
       if (!isProduction) {
-        await runtime.idempotency.complete({ organizationId: ctx.session.tenantId, scope, key: idempotencyKey, response });
+        await runtime.idempotency.complete({ organizationId: authCtx.actor.tenantId, scope, key: idempotencyKey, response });
       }
       return jsonOk(response, 201);
     } catch (error) {
-      await runtime.idempotency.fail({ organizationId: ctx.session.tenantId, scope, key: idempotencyKey });
+      if (idempotencyKey) {
+        await runtime.idempotency
+          .fail({ organizationId: authCtx.actor.tenantId, scope, key: idempotencyKey })
+          .catch(() => {});
+      }
       throw error;
     }
   } catch (error) {

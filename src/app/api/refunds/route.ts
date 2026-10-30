@@ -17,6 +17,7 @@
  */
 import { jsonError, jsonFail, jsonOk } from "@/server/http";
 import { requireAuth, authorize, assertSameOrigin, type AuthContext } from "@/server/authz";
+import type { Actor } from "@/domain/authz/rbac";
 import { runtimeFor } from "@/server/runtime";
 import { FinanceService } from "@/domain/finance/service";
 import { ERROR_CODES } from "@/domain/shared/errors";
@@ -28,12 +29,12 @@ import { assertStarted, requestHash } from "@/server/idempotency";
 /** Map the authenticated actor onto the UserRecord the service expects. */
 function actorToUser(ctx: AuthContext): UserRecord {
   return {
-    id: ctx.session.sub,
+    id: ctx.actor.userId,
     email: ctx.session.email,
     displayName: ctx.session.email,
-    role: ctx.session.role,
-    tenantId: ctx.session.tenantId,
-    outletIds: ctx.session.outletIds,
+    role: ctx.actor.role,
+    tenantId: ctx.actor.tenantId,
+    outletIds: ctx.actor.outletIds,
     active: true,
     createdAt: new Date(ctx.session.iat * 1000).toISOString(),
   };
@@ -74,7 +75,14 @@ export async function POST(req: Request): Promise<Response> {
       );
     }
 
-    authorize(ctx, "finance:refund_request", runtime.audit);
+    let liveActor: Actor | null = null;
+    if (runtime.scope === "PRODUCTION") {
+      const { requireRevalidatedLiveContext } = await import("@/server/auth/revalidate");
+      liveActor = (await requireRevalidatedLiveContext(ctx.session)).actor;
+    }
+    const authCtx: AuthContext = liveActor ? { session: ctx.session, actor: liveActor } : ctx;
+
+    authorize(authCtx, "finance:refund_request", runtime.audit);
 
     const body = (await req.json().catch(() => null)) as unknown;
     if (!body || typeof body !== "object") {
@@ -100,12 +108,20 @@ export async function POST(req: Request): Promise<Response> {
     // verbatim (no duplicate refund, no duplicate audit event). A conflicting
     // payload under the same key is rejected with 409 CONFLICT. When absent,
     // the request proceeds without idempotency (pre-OA15 behavior).
-    failTenantId = ctx.session.tenantId;
+    failTenantId = authCtx.actor.tenantId;
     idempotencyKey = req.headers.get("idempotency-key");
     if (idempotencyKey) {
-      const hash = await requestHash(body);
+      let hash: string;
+      try {
+        hash = await requestHash(body);
+      } catch (hashError) {
+        if (hashError instanceof Error && hashError.message.startsWith('requestHash:')) {
+          return jsonFail(ERROR_CODES.VALIDATION_FAILED, 'Invalid refund request', 400);
+        }
+        throw hashError;
+      }
       const begin = await runtime.idempotency.begin({
-        organizationId: ctx.session.tenantId,
+        organizationId: authCtx.actor.tenantId,
         scope: "refund.request",
         key: idempotencyKey,
         requestHash: hash,
@@ -116,10 +132,10 @@ export async function POST(req: Request): Promise<Response> {
       assertStarted(begin); // "conflict" → CONFLICT (409)
     }
 
-    const actor = actorToUser(ctx);
+    const actor = actorToUser(authCtx);
     const refund = await serviceFor(runtime as NonNullable<typeof runtime>).requestRefund({
-      tenantId: ctx.session.tenantId,
-      outletId: ctx.session.outletIds[0],
+      tenantId: authCtx.actor.tenantId,
+      outletId: authCtx.actor.outletIds[0],
       orderId,
       amountIdr,
       reason: reason.trim(),
@@ -129,8 +145,8 @@ export async function POST(req: Request): Promise<Response> {
     await runtime.audit.record({
       id: createId("aud"),
       action: AUDIT_ACTIONS.REFUND_REQUESTED,
-      actorId: ctx.session.sub,
-      actorRole: ctx.session.role,
+      actorId: authCtx.actor.userId,
+      actorRole: authCtx.actor.role,
       entityType: "refund",
       entityId: refund.id,
       tenantId: refund.tenantId,
@@ -152,7 +168,7 @@ export async function POST(req: Request): Promise<Response> {
     if (idempotencyKey) {
       idempotencyReleased = true;
       await runtime.idempotency.complete({
-        organizationId: ctx.session.tenantId,
+        organizationId: authCtx.actor.tenantId,
         scope: "refund.request",
         key: idempotencyKey,
         response: responseBody,

@@ -16,11 +16,13 @@ import { PrismaAudit } from "@/server/db/audit-adapter";
 import { PrismaIdempotency } from "@/server/db/idempotency-adapter";
 import { PrismaPayments } from "@/server/db/payment-adapter";
 import { MemoryOrders, MemoryCatalog, MemoryPayments, MemoryFinance } from "@/server/db/memory-store";
+import { MemoryReservations, PrismaReservations } from "@/server/db/reservation-adapter";
 import { InMemoryIdempotency } from "@/server/idempotency";
 import { serverAudit } from "@/server/audit";
 import { PrismaFinance } from "@/server/db/finance-adapter";
 import type { SessionPayload } from "@/server/session";
 import type { CatalogPort, OrderPort, PaymentPort } from "@/domain/shared/ports";
+import type { ReservationPort } from "@/domain/reservations/service";
 import type { AuditLogPort } from "@/domain/audit/events";
 import type { IdempotencyPort } from "@/server/idempotency";
 import type { FinancePort } from "@/domain/finance/ports";
@@ -32,6 +34,7 @@ export interface Runtime {
   idempotency: IdempotencyPort;
   payments: PaymentPort;
   finance: FinancePort;
+  reservations: ReservationPort;
   scope: "DEMO" | "PRODUCTION";
 }
 
@@ -47,16 +50,19 @@ export function demoSandbox(): Runtime {
       idempotency: new InMemoryIdempotency(),
       payments: new MemoryPayments(),
       finance: new MemoryFinance(),
+      reservations: new MemoryReservations(),
       scope: "DEMO",
     };
   }
-  return globalForDemo.__hansanDemoRuntime;
+  return globalForDemo.__hansanDemoRuntime!;
 }
 
 export function runtimeFor(session: SessionPayload): Runtime | null {
   if (session.mode === "demo" || session.dataScope === "DEMO") return demoSandbox();
   const db = getPrisma();
   if (!db) return null;
+  // Reservations now use durable Prisma persistence (Phase B/C). Demo sessions
+  // keep MemoryReservations; UnavailableReservations remains only when no DB.
   return {
     orders: new PrismaOrders(db),
     catalog: new PrismaCatalog(db),
@@ -64,6 +70,7 @@ export function runtimeFor(session: SessionPayload): Runtime | null {
     idempotency: new PrismaIdempotency(db),
     payments: new PrismaPayments(db),
     finance: new PrismaFinance(db),
+    reservations: new PrismaReservations(db),
     scope: "PRODUCTION",
   };
 }

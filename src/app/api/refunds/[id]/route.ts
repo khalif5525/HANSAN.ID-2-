@@ -19,6 +19,7 @@
  */
 import { jsonError, jsonFail, jsonOk } from "@/server/http";
 import { requireAuth, authorize, assertSameOrigin, type AuthContext } from "@/server/authz";
+import type { Actor } from "@/domain/authz/rbac";
 import { runtimeFor } from "@/server/runtime";
 import { FinanceService } from "@/domain/finance/service";
 import { ERROR_CODES } from "@/domain/shared/errors";
@@ -26,12 +27,12 @@ import type { UserRecord } from "@/domain/shared/ports";
 
 function actorToUser(ctx: AuthContext): UserRecord {
   return {
-    id: ctx.session.sub,
+    id: ctx.actor.userId,
     email: ctx.session.email,
     displayName: ctx.session.email,
-    role: ctx.session.role,
-    tenantId: ctx.session.tenantId,
-    outletIds: ctx.session.outletIds,
+    role: ctx.actor.role,
+    tenantId: ctx.actor.tenantId,
+    outletIds: ctx.actor.outletIds,
     active: true,
     createdAt: new Date(ctx.session.iat * 1000).toISOString(),
   };
@@ -69,6 +70,13 @@ export async function PATCH(req: Request): Promise<Response> {
       );
     }
 
+    let liveActor: Actor | null = null;
+    if (runtime.scope === "PRODUCTION") {
+      const { requireRevalidatedLiveContext } = await import("@/server/auth/revalidate");
+      liveActor = (await requireRevalidatedLiveContext(ctx.session)).actor;
+    }
+    const authCtx: AuthContext = liveActor ? { session: ctx.session, actor: liveActor } : ctx;
+
     const refundId = getRefundId(req);
     if (!refundId) {
       return jsonFail(ERROR_CODES.VALIDATION_FAILED, "Refund ID is required", 400);
@@ -87,21 +95,21 @@ export async function PATCH(req: Request): Promise<Response> {
       );
     }
 
-    const actor = actorToUser(ctx);
+    const actor = actorToUser(authCtx);
     const finance = serviceFor(runtime);
 
     // Load the refund to verify tenant scope before authorizing.
-    const refund = await runtime.finance.getRefund(refundId, ctx.session.tenantId);
+    const refund = await runtime.finance.getRefund(refundId, authCtx.actor.tenantId);
     if (!refund) {
       return jsonFail(ERROR_CODES.NOT_FOUND, "Refund not found", 404);
     }
     // Cross-tenant access is denied as NOT_FOUND (no existence leak).
-    if (refund.tenantId !== ctx.session.tenantId) {
+    if (refund.tenantId !== authCtx.actor.tenantId) {
       return jsonFail(ERROR_CODES.NOT_FOUND, "Refund not found", 404);
     }
     // Outlet scope: owner/finance may access any outlet; others limited to granted outlets.
-    if (ctx.session.role !== "owner" && ctx.session.role !== "finance") {
-      if (!ctx.session.outletIds.includes(refund.outletId)) {
+    if (authCtx.actor.role !== "owner" && authCtx.actor.role !== "finance") {
+      if (!authCtx.actor.outletIds.includes(refund.outletId)) {
         return jsonFail(ERROR_CODES.OUTLET_MISMATCH, "Outlet access denied", 403);
       }
     }
@@ -109,12 +117,12 @@ export async function PATCH(req: Request): Promise<Response> {
     let result: Awaited<ReturnType<typeof finance.decideRefund>>;
 
     if (action === "approve" || action === "reject") {
-      authorize(ctx, "finance:refund_approve", runtime.audit);
+      authorize(authCtx, "finance:refund_approve", runtime.audit);
       const decision = action === "approve" ? "approved" : "rejected";
       result = await finance.decideRefund(refundId, decision, actor);
     } else {
       // action === "complete"
-      authorize(ctx, "finance:refund_complete", runtime.audit);
+      authorize(authCtx, "finance:refund_complete", runtime.audit);
       result = await finance.completeRefund(refundId, actor);
     }
 

@@ -83,6 +83,20 @@ describe("server authorization", () => {
     expect(audit.events[0]!.action).toBe("auth.access_denied");
     expect(audit.events[0]!.entityId).toBe("pos:order_create");
   });
+  it("access-denied audit uses the revalidated actor identity, not stale session claims", () => {
+    const audit = new MemoryAudit();
+    const session = createDemoSession({ userId: "usr_stale_session", role: "kds", email: "kds@hansan.local", now });
+    const ctx: AuthContext = {
+      session,
+      actor: { userId: "usr_revalidated", role: "kds", tenantId: "ten_revalidated", outletIds: [] },
+    };
+    expect(() => authorize(ctx, "pos:order_create", audit)).toThrowError(/lacks permission/);
+    expect(audit.events).toHaveLength(1);
+    expect(audit.events[0]!.actorId).toBe("usr_revalidated");
+    expect(audit.events[0]!.actorRole).toBe("kds");
+    expect(audit.events[0]!.tenantId).toBe("ten_revalidated");
+  });
+
   it("developer role holds no business permissions (platform/business separation)", () => {
     const audit = new MemoryAudit();
     const dev = demoCtx("developer");

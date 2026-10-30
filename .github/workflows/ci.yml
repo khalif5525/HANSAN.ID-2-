@@ -70,6 +70,10 @@ jobs:
 
       - name: Unit tests
         run: npm test
+        # Default lane excludes tests/pg-live-*.test.ts (fail-closed live-PG
+        # suites). Those require an authorized disposable local database and are
+        # run via `npm run test:live-pg` outside CI; do not treat their absence
+        # as passed live-PG coverage.
 
       - name: Prisma DB schema validation (schema-only, no DB)
         run: npm run db:validate

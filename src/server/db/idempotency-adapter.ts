@@ -81,4 +81,12 @@ export class PrismaIdempotency implements IdempotencyPort {
       await this.db.idempotencyRecord.delete({ where: this.where(params) }).catch(() => {});
     }
   }
+
+  async get(params: KeyParts): Promise<unknown | null> {
+    const existing = await this.db.idempotencyRecord.findUnique({ where: this.where(params) });
+    if (existing && existing.status === 'completed') {
+      return existing.responseJson ? JSON.parse(existing.responseJson) : null;
+    }
+    return null;
+  }
 }

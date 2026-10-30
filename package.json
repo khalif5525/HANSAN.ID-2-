@@ -9,6 +9,11 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:live-pg": "vitest run --config vitest.live-pg.config.ts",
+    "test:live-pg:pgbouncer": "vitest run --config vitest.live-pg.config.ts tests/pg-live-pg5-pgbouncer-pool.test.ts",
+    "test:all": "npm run test && npm run test:live-pg",
+    "verify": "npm run typecheck && npm run lint && npm run test && npm run build",
     "db:validate": "prisma validate",
     "db:generate": "prisma generate",
     "db:migrate:status": "prisma migrate status"

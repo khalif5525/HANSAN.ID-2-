@@ -160,11 +160,11 @@ async function recordAccessDenied(
   const event: AuditEvent = {
     id: createId("aud"),
     action: AUDIT_ACTIONS.ACCESS_DENIED,
-    actorId: ctx.session.sub,
-    actorRole: ctx.session.role,
+    actorId: ctx.actor.userId,
+    actorRole: ctx.actor.role,
     entityType: "permission",
     entityId: permission,
-    tenantId: ctx.session.tenantId,
+    tenantId: ctx.actor.tenantId,
     occurredAt: new Date().toISOString(),
     ...(meta ? { metadata: meta } : {}),
   };

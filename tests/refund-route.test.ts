@@ -667,6 +667,24 @@ describe("Refund idempotency (POST /api/refunds with Idempotency-Key)", () => {
     expect(failCode(conflicting.json)).toBe(ERROR_CODES.CONFLICT);
   });
 
+  it("maps unsupported requestHash input to 400 VALIDATION_FAILED", async () => {
+    const { token } = await demoSession({ role: "pos", userId: "usr_cashier" });
+    const req = new Request("http://localhost/api/refunds", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "idem_refund_unsupported",
+        ...authHeaders(token),
+      },
+      body: '{"orderId":"ord_paid_1","amountIdr":30000,"reason":"defective unit","extra":1e999}',
+    });
+    const res = await REFUND_REQUEST_POST(req);
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(failCode(json)).toBe(ERROR_CODES.VALIDATION_FAILED);
+  });
+
+
   it("cross-tenant idempotency key isolation: same key, different tenant → separate refunds", async () => {
     const orders = demoSandbox().orders as MemoryOrders;
     const catalog = demoSandbox().catalog as MemoryCatalog;

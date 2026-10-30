@@ -20,9 +20,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   // Runtime: Supabase transaction pooler (port 6543) — serverless-safe.
-  url = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
   // Migrations/admin: Supabase direct/session connection (port 5432).
   // Prisma uses this for `migrate` so advisory locks and DDL never contend
   // with the pooler. Same database as DATABASE_URL — not a different target.
@@ -49,18 +49,19 @@ model Organization {
   active    Boolean   @default(true)
   createdAt DateTime  @default(now())
 
-  outlets         Outlet[]
-  memberships     Membership[]
-  menuCategories  MenuCategory[]
-  menuItems       MenuItem[]
-  ingredients     Ingredient[]
-  movements       InventoryMovement[]
-  orders          Order[]
-  idempotency     IdempotencyRecord[]
-  payments        Payment[]
-  refunds         Refund[]
+  outlets           Outlet[]
+  memberships       Membership[]
+  menuCategories    MenuCategory[]
+  menuItems         MenuItem[]
+  ingredients       Ingredient[]
+  movements         InventoryMovement[]
+  orders            Order[]
+  idempotency       IdempotencyRecord[]
+  payments          Payment[]
+  refunds           Refund[]
   settlementBatches SettlementBatch[]
-  approvals       Approval[]
+  approvals         Approval[]
+  reservations      Reservation[]
 }
 
 model Outlet {
@@ -70,13 +71,15 @@ model Outlet {
   active         Boolean  @default(true)
   createdAt      DateTime @default(now())
 
-  organization Organization       @relation(fields: [organizationId], references: [id])
-  memberships   Membership[]
-  orders        Order[]
-  counters      SequenceCounter[]
-  payments      Payment[]
-  refunds       Refund[]
-  batches       SettlementBatch[]
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  memberships  Membership[]
+  orders       Order[]
+  counters     SequenceCounter[]
+  payments     Payment[]
+  refunds      Refund[]
+  batches      SettlementBatch[]
+  reservations Reservation[]
+
   @@index([organizationId])
 }
 
@@ -93,6 +96,7 @@ model User {
 
   memberships Membership[]
   auditEvents AuditEvent[] @relation("AuditActor")
+
   @@index([authSubject])
 }
 
@@ -108,12 +112,12 @@ enum OrgRole {
 }
 
 model Membership {
-  id             String  @id @default(cuid())
+  id             String   @id @default(cuid())
   userId         String
   organizationId String
   outletId       String? // null = every outlet of the organization
   role           OrgRole
-  active         Boolean @default(true)
+  active         Boolean  @default(true)
   createdAt      DateTime @default(now())
 
   user         User         @relation(fields: [userId], references: [id])
@@ -134,14 +138,15 @@ enum Station {
 }
 
 model MenuCategory {
-  id             String   @id
+  id             String  @id
   organizationId String
   name           String
-  sortOrder      Int      @default(0)
-  active         Boolean  @default(true)
+  sortOrder      Int     @default(0)
+  active         Boolean @default(true)
 
   organization Organization @relation(fields: [organizationId], references: [id])
   items        MenuItem[]
+
   @@index([organizationId])
 }
 
@@ -159,6 +164,7 @@ model MenuItem {
   organization Organization @relation(fields: [organizationId], references: [id])
   category     MenuCategory @relation(fields: [categoryId], references: [id])
   recipe       Recipe?
+
   @@index([organizationId, active])
 }
 
@@ -171,19 +177,20 @@ enum UnitCode {
 }
 
 model Ingredient {
-  id                String   @id
+  id                String    @id
   organizationId    String
   name              String
   unit              UnitCode
   /// Live stock balance in `unit` (decimal, 3 dp).
-  quantity          Decimal  @db.Decimal(14, 3)
-  lowStockThreshold Decimal  @db.Decimal(14, 3) @default(0)
+  quantity          Decimal   @db.Decimal(14, 3)
+  lowStockThreshold Decimal   @default(0) @db.Decimal(14, 3)
   expiryDate        DateTime?
-  updatedAt         DateTime @default(now())
+  updatedAt         DateTime  @default(now())
 
   organization Organization        @relation(fields: [organizationId], references: [id])
   recipeItems  RecipeItem[]
   movements    InventoryMovement[]
+
   @@index([organizationId])
 }
 
@@ -191,7 +198,7 @@ model Ingredient {
 model Recipe {
   id         String   @id @default(cuid())
   menuItemId String   @unique
-  yieldQty   Decimal  @db.Decimal(14, 3) @default(1)
+  yieldQty   Decimal  @default(1) @db.Decimal(14, 3)
   yieldUnit  UnitCode @default(pc)
 
   menuItem MenuItem     @relation(fields: [menuItemId], references: [id])
@@ -208,9 +215,9 @@ model RecipeItem {
 
   recipe     Recipe     @relation(fields: [recipeId], references: [id])
   ingredient Ingredient @relation(fields: [ingredientId], references: [id])
+
   @@unique([recipeId, ingredientId])
 }
-
 
 enum MovementType {
   purchase_receipt
@@ -236,6 +243,7 @@ model InventoryMovement {
 
   ingredient   Ingredient   @relation(fields: [ingredientId], references: [id])
   organization Organization @relation(fields: [organizationId], references: [id])
+
   @@index([ingredientId, occurredAt])
   @@index([organizationId, occurredAt])
 }
@@ -336,6 +344,7 @@ model SequenceCounter {
   value    BigInt @default(0)
 
   outlet Outlet @relation(fields: [outletId], references: [id])
+
   @@id([outletId, kind])
 }
 
@@ -345,19 +354,19 @@ model SequenceCounter {
 model IdempotencyRecord {
   id             String   @id @default(cuid())
   organizationId String
-  scope        String // e.g. "orders.create"
-  key          String // client-supplied Idempotency-Key header
-  requestHash  String // sha256 of the canonical request body
-  status       String // in_progress | completed | failed
-  responseJson String? // serialized result for completed replays
-  createdAt    DateTime @default(now())
-  expiresAt    DateTime
+  scope          String // e.g. "orders.create"
+  key            String // client-supplied Idempotency-Key header
+  requestHash    String // sha256 of the canonical request body
+  status         String // in_progress | completed | failed
+  responseJson   String? // serialized result for completed replays
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
 
   organization Organization @relation(fields: [organizationId], references: [id])
+
   @@unique([organizationId, scope, key])
   @@index([expiresAt])
 }
-
 
 // ---------------------------------------------------------------------------
 // Payments, refunds, settlement, approvals, audit
@@ -374,22 +383,22 @@ enum PayMethod {
 /// rows — never typed in. Provider fields stay null until a gateway exists
 /// (BLOCKER-005); no automatic reconciliation is claimed before then.
 model Payment {
-  id                 String          @id // domain payment id
-  organizationId     String
-  outletId           String
-  orderId            String
-  dataScope          DataScope       @default(PRODUCTION)
-  amountIdr          BigInt // whole rupiah, integer
-  method             PayMethod
-  capturedBy         String
-  capturedAt         DateTime        @default(now())
-  externalRef        String? // provider reference once a gateway is wired
-  settlementBatchId  String?
+  id                String    @id // domain payment id
+  organizationId    String
+  outletId          String
+  orderId           String
+  dataScope         DataScope @default(PRODUCTION)
+  amountIdr         BigInt // whole rupiah, integer
+  method            PayMethod
+  capturedBy        String
+  capturedAt        DateTime  @default(now())
+  externalRef       String? // provider reference once a gateway is wired
+  settlementBatchId String?
 
-  organization     Organization     @relation(fields: [organizationId], references: [id])
-  outlet           Outlet           @relation(fields: [outletId], references: [id])
-  order            Order            @relation(fields: [orderId], references: [id])
-  settlementBatch  SettlementBatch? @relation(fields: [settlementBatchId], references: [id])
+  organization    Organization     @relation(fields: [organizationId], references: [id])
+  outlet          Outlet           @relation(fields: [outletId], references: [id])
+  order           Order            @relation(fields: [orderId], references: [id])
+  settlementBatch SettlementBatch? @relation(fields: [settlementBatchId], references: [id])
 
   @@index([organizationId, outletId, capturedAt])
   @@index([orderId])
@@ -437,19 +446,19 @@ enum SettlementStatus {
 /// `totalAmountIdr` is written by the close routine as the sum of its member
 /// payments inside one transaction; approval identity is always recorded.
 model SettlementBatch {
-  id              String           @id @default(cuid())
-  organizationId  String
-  outletId        String
-  dataScope       DataScope        @default(PRODUCTION)
-  batchNumber     String
-  status          SettlementStatus @default(open)
-  totalAmountIdr  BigInt           @default(0)
-  openedBy        String
-  openedAt        DateTime         @default(now())
-  closedBy        String?
-  closedAt        DateTime?
-  approvedBy      String?
-  approvedAt      DateTime?
+  id             String           @id @default(cuid())
+  organizationId String
+  outletId       String
+  dataScope      DataScope        @default(PRODUCTION)
+  batchNumber    String
+  status         SettlementStatus @default(open)
+  totalAmountIdr BigInt           @default(0)
+  openedBy       String
+  openedAt       DateTime         @default(now())
+  closedBy       String?
+  closedAt       DateTime?
+  approvedBy     String?
+  approvedAt     DateTime?
 
   organization Organization @relation(fields: [organizationId], references: [id])
   outlet       Outlet       @relation(fields: [outletId], references: [id])
@@ -472,6 +481,7 @@ model Approval {
   decidedAt      DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id])
+
   @@index([organizationId, entityType, entityId])
 }
 
@@ -490,8 +500,42 @@ model AuditEvent {
   metadata       Json?
 
   actor User? @relation("AuditActor", fields: [actorId], references: [id])
+
   @@index([occurredAt])
   @@index([organizationId, occurredAt])
   @@index([entityType, entityId])
 }
 
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  EXPIRED
+  COMPLETED
+}
+
+model Reservation {
+  id              String            @id // "rsv_..."
+  organizationId  String
+  outletId        String
+  dataScope       DataScope         @default(PRODUCTION)
+  customerName    String
+  customerEmail   String
+  customerPhone   String
+  partySize       Int
+  reservationAt   DateTime
+  durationMinutes Int               @default(60)
+  status          ReservationStatus @default(CONFIRMED)
+  tableId         String?
+  area            String?
+  notes           String?
+  createdBy       String
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  outlet       Outlet       @relation(fields: [outletId], references: [id])
+
+  @@index([organizationId, outletId, reservationAt])
+  @@index([outletId, status, reservationAt])
+}
