@@ -6,7 +6,8 @@
 import { AppError, ERROR_CODES } from "@/domain/shared/errors";
 import { createId } from "@/domain/shared/ids";
 import type { AuditLogPort } from "@/domain/audit/events";
-import type { CatalogPort, OrderPort, OrderRecord, OrderState, UserRecord } from "@/domain/shared/ports";
+import type { CatalogPort, OrderPort, OrderRecord, OrderState, PaymentPort, PayMethod, UserRecord } from "@/domain/shared/ports";
+import type { TenantScope } from "@/domain/shared/tenant-scope";
 import { assertCartNotEmpty, cartAdd, cartSubtotalIdr, EMPTY_CART, type Cart } from "@/domain/pos/cart";
 import { computeTotals, type TaxConfig } from "@/domain/pos/totals";
 import { validateOrderAssociations, type RefundPolicy } from "@/domain/pos/rules";
@@ -16,6 +17,7 @@ import {
   requestRefund,
   transitionOrder,
   type LifecycleDeps,
+  type PaymentLifecycleDeps,
 } from "@/domain/pos/lifecycle";
 import type { CreateOrderRequest, OrderHistoryItem, OrderHistoryQuery } from "@/domain/pos/contracts";
 import { toHistoryItem } from "@/domain/pos/contracts";
@@ -24,22 +26,26 @@ export interface PosServiceDeps {
   orders: OrderPort;
   catalog: CatalogPort;
   audit: AuditLogPort;
+  payments: PaymentPort;
   tax: TaxConfig;
   clock: () => Date;
 }
 
 export class PosService {
   private readonly lifecycle: LifecycleDeps;
+  private readonly paymentLifecycle: PaymentLifecycleDeps;
 
   constructor(private readonly deps: PosServiceDeps) {
     this.lifecycle = { orders: deps.orders, audit: deps.audit, clock: deps.clock };
+    this.paymentLifecycle = { ...this.lifecycle, payments: deps.payments };
   }
 
   /** Price a request from the server catalog — client prices are ignored. */
   async priceRequest(req: CreateOrderRequest, tenantId: string): Promise<Cart> {
     let cart: Cart = EMPTY_CART;
     for (const line of req.lines) {
-      const product = await this.deps.catalog.findById(line.productId);
+      // Phase 12 — scoped catalog read: `tenantId` is the verified actor's tenant (never a request-body field); a cross-tenant product id resolves to null → NOT_FOUND.
+      const product = await this.deps.catalog.findById(line.productId, { organizationId: tenantId });
       if (!product || !product.active || product.tenantId !== tenantId) {
         throw new AppError(ERROR_CODES.NOT_FOUND, { message: `Unknown product: ${line.productId}` });
       }
@@ -106,20 +112,20 @@ export class PosService {
     return order;
   }
 
-  transition(orderId: string, to: OrderState, actorId: string): Promise<OrderRecord> {
-    return transitionOrder(this.lifecycle, orderId, to, actorId);
+  transition(orderId: string, scope: TenantScope, to: OrderState, actorId: string): Promise<OrderRecord> {
+    return transitionOrder(this.lifecycle, orderId, scope, to, actorId);
   }
 
-  pay(orderId: string, actorId: string): Promise<OrderRecord> {
-    return capturePayment(this.lifecycle, orderId, actorId);
+  pay(orderId: string, scope: TenantScope, actorId: string, method: PayMethod): Promise<OrderRecord> {
+    return capturePayment(this.paymentLifecycle, orderId, scope, actorId, method);
   }
 
-  cancel(orderId: string, actorId: string): Promise<OrderRecord> {
-    return cancelOrder(this.lifecycle, orderId, actorId);
+  cancel(orderId: string, scope: TenantScope, actorId: string): Promise<OrderRecord> {
+    return cancelOrder(this.lifecycle, orderId, scope, actorId);
   }
 
-  requestRefund(orderId: string, actorId: string, policy?: RefundPolicy): Promise<OrderRecord> {
-    return requestRefund(this.lifecycle, orderId, actorId, policy);
+  requestRefund(orderId: string, scope: TenantScope, actorId: string, policy?: RefundPolicy): Promise<OrderRecord> {
+    return requestRefund(this.lifecycle, orderId, scope, actorId, policy);
   }
 
   async history(query: OrderHistoryQuery): Promise<OrderHistoryItem[]> {
@@ -128,5 +134,10 @@ export class PosService {
       ...(query.sinceIso ? { sinceIso: query.sinceIso } : {}),
     });
     return orders.map(toHistoryItem);
+  }
+
+  /** Read one order by its persisted id — `scope` is REQUIRED (Phase 12), comes from the verified actor, and a cross-tenant id resolves to null (non-leaking). */
+  async getOrderById(orderId: string, scope: TenantScope): Promise<OrderRecord | null> {
+    return this.deps.orders.findById(orderId, scope);
   }
 }

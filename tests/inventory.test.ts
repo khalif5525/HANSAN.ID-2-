@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { convertQuantity, toBase, howManyFit, UNIT_META, BASE_UNIT } from "@/domain/inventory/units";
+import { convertQuantity, toBase, howManyFit, BASE_UNIT } from "@/domain/inventory/units";
 import { unwrap } from "@/domain/shared/result";
 import { applyStockChange, validateBatch, isLowStock, isExpired } from "@/domain/inventory/stock";
 import { computableProducible, buildDeductionPlan, validateRecipe, type Recipe } from "@/domain/inventory/recipes";
 import type { StockMaterialRecord } from "@/domain/inventory/ports";
-import { AppError, ERROR_CODES } from "@/domain/shared/errors";
+import { ERROR_CODES } from "@/domain/shared/errors";
 
 describe("units", () => {
   it("converts within dimension", () => {

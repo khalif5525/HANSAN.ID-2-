@@ -3,7 +3,7 @@ import { MemoryCustomers } from "./helpers/memory";
 import { CustomerService } from "@/domain/customers/service";
 import { pointsForOrder, tierForPoints } from "@/domain/customers/loyalty";
 import { assertReservationTransition, validateGuestCount, validateWindow, validateAvailability, windowsOverlap } from "@/domain/customers/reservations";
-import type { CustomerRecord, ReservationRecord } from "@/domain/customers/ports";
+import type { ReservationRecord } from "@/domain/customers/ports";
 import { ERROR_CODES } from "@/domain/shared/errors";
 
 function deps(clock: () => Date = () => new Date("2026-01-01T00:00:00.000Z")) {
@@ -61,7 +61,8 @@ describe("reservation availability", () => {
   it("validateAvailability blocks overlapping occupancy on the same table", () => {
     const r1 = reservation("r1", "t1", "2026-01-01T18:00:00", "2026-01-01T19:00:00", "confirmed");
     const r2 = reservation("r2", "t1", "2026-01-01T18:30:00", "2026-01-01T19:30:00", "confirmed");
-    const r3 = reservation("r3", "t2", "2026-01-01T18:30:00", "2026-01-01T19:30:00", "confirmed");
+    const r2Other = reservation("r2", "t2", "2026-01-01T18:30:00", "2026-01-01T19:30:00", "confirmed");
+    void r2Other;
     expect(validateAvailability({ tableId: "t1", startAt: "2026-01-01T18:30:00", endAt: "2026-01-01T19:30:00", status: "confirmed" as const }, [r1, r2]).ok).toBe(false);
     expect(validateAvailability({ tableId: "t2", startAt: "2026-01-01T18:30:00", endAt: "2026-01-01T19:30:00", status: "confirmed" as const }, [r1, r2]).ok).toBe(true);
     expect(validateAvailability({ tableId: null, startAt: "2026-01-01T18:30:00", endAt: "2026-01-01T19:30:00", status: "confirmed" as const }, [r1, r2]).ok).toBe(true);

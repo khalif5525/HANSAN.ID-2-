@@ -1,17 +1,19 @@
 import { NextResponse } from "next/server";
+import { hasDatabase, hasSupabaseAuth } from "@/config/environment";
 
 /**
- * Phase 0 health endpoint — honest development states only (§12).
- * External systems are NOT connected; report "not-configured".
+ * Health endpoint — reports honest runtime configuration state (no secrets).
  */
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   return NextResponse.json({
     app: "hansan",
     phase: "Phase 0 — Project Foundation",
     status: "ok",
     integrations: {
-      database: "not-configured",
-      auth: "development-only-planned",
+      database: hasDatabase() ? "configured" : "not-configured",
+      auth: hasSupabaseAuth() ? "configured" : "development-only-planned",
       payments: "not-configured",
     },
     timestamp: new Date().toISOString(),

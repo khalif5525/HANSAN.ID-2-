@@ -12,11 +12,12 @@ export interface ButtonProps
 
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
   primary:
-    "bg-hansan-orange text-white shadow-neu-raised-sm hover:brightness-105 active:brightness-95",
+    "border-2 border-hansan-ink bg-hansan-orange text-white shadow-orbit hover:brightness-105 active:translate-x-[2px] active:translate-y-[2px] active:shadow-none",
   secondary:
-    "border border-hansan-line-strong bg-hansan-surface-raised text-hansan-ink hover:border-hansan-ink",
-  ghost: "bg-transparent text-hansan-ink hover:bg-hansan-surface-sunken",
-  danger: "bg-hansan-danger text-white shadow-neu-raised-sm hover:brightness-105",
+    "border-2 border-hansan-ink bg-hansan-ivory text-hansan-ink shadow-orbit-sm hover:bg-hansan-surface-raised active:translate-x-[2px] active:translate-y-[2px] active:shadow-none",
+  ghost: "border-2 border-transparent text-hansan-ink hover:border-hansan-line hover:bg-hansan-surface-sunken",
+  danger:
+    "border-2 border-hansan-ink bg-hansan-danger text-white shadow-orbit hover:brightness-105 active:translate-x-[2px] active:translate-y-[2px] active:shadow-none",
 };
 
 const SIZE_CLASS: Record<ButtonSize, string> = {
@@ -26,7 +27,9 @@ const SIZE_CLASS: Record<ButtonSize, string> = {
 };
 
 /**
- * Generic Button primitive (§13). Visual states only — no business logic.
+ * Generic Button primitive — approved ORBIT treatment.
+ * 2px ink outline + rounded-orbit (14px) + hard offset shadow (zero
+ * blur); pressed state collapses the offset. Visual states only.
  * Disabled + loading states required per §22.
  */
 export function Button({
@@ -44,7 +47,7 @@ export function Button({
       type="button"
       aria-busy={loading || undefined}
       disabled={isDisabled}
-      className={`inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition duration-fast focus-visible:outline-none focus-visible:[box-shadow:var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 ${VARIANT_CLASS[variant]} ${SIZE_CLASS[size]} ${className}`.trim()}
+      className={`inline-flex items-center justify-center gap-2 rounded-orbit font-semibold transition duration-fast focus-visible:outline-none focus-visible:[box-shadow:var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none ${VARIANT_CLASS[variant]} ${SIZE_CLASS[size]} ${className}`.trim()}
       {...rest}
     >
       {loading && (

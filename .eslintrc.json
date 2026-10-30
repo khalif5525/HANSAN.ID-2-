@@ -1,3 +1,29 @@
 {
-  "extends": ["next/core-web-vitals", "next/typescript"]
+  "extends": ["next/core-web-vitals", "next/typescript"],
+  "overrides": [
+    {
+      "files": ["src/lib/**", "src/components/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@/server/**",
+                  "@/server/*",
+                  "@/server/supabase/admin",
+                  "@/server/supabase/server",
+                  "@/server/config/secrets",
+                  "server-only"
+                ],
+                "message": "Server-only modules (@/server/*) and the `server-only` marker must never be imported from browser-safe code (src/lib, src/components). They carry server credentials and are blocked from the client bundle by the `server-only` boundary."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
 }
+

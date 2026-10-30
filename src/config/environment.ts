@@ -8,11 +8,19 @@
 export interface AppConfig {
   nodeEnv: "development" | "test" | "production";
   appName: string;
-  /** Supabase Auth (Phase 13) — null until configured. */
+  /** Supabase project URL (Phase 13) — null until configured. */
   supabaseUrl: string | null;
-  supabaseAnonKey: string | null;
+  /**
+   * Client-safe Supabase publishable (formerly "anon") key — the single
+   * public value handed to the Supabase SDK. Resolved from the modern
+   * `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` first, falling back to the legacy
+   * `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Safe to expose to the browser by design.
+   */
+  supabasePublishableKey: string | null;
   /** Database (deferred) — null until configured. */
   databaseUrl: string | null;
+  /** Interim demo-session signing secret (Phase 3). Server-only: NEVER expose via NEXT_PUBLIC_ or log. */
+  sessionSecret: string | null;
 }
 
 function read(name: string): string | null {
@@ -26,14 +34,19 @@ export function getConfig(): AppConfig {
     nodeEnv: nodeEnvRaw === "production" ? "production" : nodeEnvRaw === "test" ? "test" : "development",
     appName: read("NEXT_PUBLIC_APP_NAME") ?? "HANSAN",
     supabaseUrl: read("NEXT_PUBLIC_SUPABASE_URL"),
-    supabaseAnonKey: read("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    // New Supabase key naming (publishable) with legacy anon fallback.
+    // Server secrets (SUPABASE_SECRET_KEY / service-role / DB password) are
+    // intentionally NEVER read here — they must never reach the client bundle.
+    supabasePublishableKey:
+      read("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY") ?? read("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
     databaseUrl: read("DATABASE_URL") ?? read("POSTGRES_URL") ?? read("PRISMA_DATABASE_URL"),
+    sessionSecret: read("SESSION_SECRET"),
   };
 }
 
 export function hasSupabaseAuth(): boolean {
   const c = getConfig();
-  return Boolean(c.supabaseUrl && c.supabaseAnonKey);
+  return Boolean(c.supabaseUrl && c.supabasePublishableKey);
 }
 
 export function hasDatabase(): boolean {

@@ -11,6 +11,9 @@ export const AUDIT_ACTIONS = {
   SIGN_IN_FAILED: "auth.sign_in_failed",
   ROLE_ASSIGNED: "auth.role_assigned",
   ACCESS_DENIED: "auth.access_denied",
+  PROVISION_OWNER: "auth.provision_owner",
+  STAFF_INVITED: "auth.staff_invited",
+  PROVISION_DEVELOPER: "auth.provision_developer",
   // finance / refunds
   REFUND_REQUESTED: "finance.refund_requested",
   REFUND_APPROVED: "finance.refund_approved",
@@ -22,6 +25,7 @@ export const AUDIT_ACTIONS = {
   STOCK_WASTE: "inventory.stock_waste",
   PURCHASE_RECEIVED: "inventory.purchase_received",
   // orders
+  ORDER_CREATED: "order.created",
   ORDER_CANCELLED: "order.cancelled",
   ORDER_REFUNDED: "order.refunded",
   PAYMENT_CAPTURED: "order.payment_captured",

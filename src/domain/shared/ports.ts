@@ -66,6 +66,13 @@ export interface OrderRecord {
   outletId: string;
   orderNumber: string;
   orderType: OrderType;
+  /**
+   * Demo/production separation at rest. Persistence pins this from the
+   * acting session's scope so DEMO rows can never mix into production
+   * ledgers (see prisma/rls-demo-isolation.sql). Optional so existing
+   * in-memory fixtures stay unchanged; adapters default to PRODUCTION.
+   */
+  dataScope?: "DEMO" | "PRODUCTION";
   tableId: string | null;
   customerId: string | null;
   lines: OrderLine[];
@@ -81,11 +88,61 @@ export interface OrderRecord {
 }
 
 export interface OrderPort {
-  findById(id: string): Promise<OrderRecord | null>;
+  /**
+   * Fetch one order. `scope` is REQUIRED (Phase 12): the adapter MUST enforce it
+   * at the query boundary (defense in depth) AND pin the tenant GUCs inside the
+   * same transaction, so the read is RLS-compatible and a record outside the
+   * caller's tenant/outlet resolves to `null` even if a route-level check is
+   * bypassed. There is deliberately NO unscoped fallback — a production read
+   * without an authoritative organizationId is a bug, not a legacy mode.
+   */
+  findById(id: string, scope: { organizationId: string; outletId?: string }): Promise<OrderRecord | null>;
   save(order: OrderRecord): Promise<void>;
   listByOutlet(outletId: string, options?: { limit?: number; sinceIso?: string }): Promise<OrderRecord[]>;
   listByTenant(tenantId: string, options?: { limit?: number; sinceIso?: string }): Promise<OrderRecord[]>;
   nextOrderNumber(outletId: string): Promise<string>;
+}
+
+// ---------- payments ----------
+/**
+ * Payment methods a POS terminal may settle with. CASH is the only method the
+ * initial release can settle end-to-end; the rest are modeled in the schema
+ * (`PayMethod`) but not yet captured by a gateway (BLOCKER-005).
+ */
+export type PayMethod = "cash" | "qris" | "card" | "transfer";
+
+/**
+ * A single persisted capture against one order. The schema comment on
+ * `model Payment` is authoritative: "Finance totals are SUMS over these rows —
+ * never typed in." A payment exists ONLY as a persisted row; an order whose
+ * `paymentState` is "paid" with no matching Payment row is a data-integrity
+ * error, which is why capture must write both in ONE transaction.
+ */
+export interface PaymentRecord {
+  id: string;
+  tenantId: string;
+  outletId: string;
+  orderId: string;
+  dataScope?: "DEMO" | "PRODUCTION";
+  amountIdr: number;
+  method: PayMethod;
+  /** Acting cashier who captured the payment. */
+  capturedBy: string;
+  capturedAt: string;
+  /** Provider reference once a gateway is wired; null for cash/manual capture. */
+  externalRef?: string | null;
+}
+
+export interface PaymentPort {
+  save(payment: PaymentRecord): Promise<void>;
+  /**
+   * List captures for one order. `scope` is REQUIRED (Phase 12): the adapter
+   * verifies the parent order belongs to `scope.organizationId` and returns []
+   * otherwise — a cross-tenant orderId can never leak rows — and pins the tenant
+   * GUCs so the read is RLS-compatible. No unscoped fallback exists by design.
+   */
+  listByOrder(orderId: string, scope: { organizationId: string }): Promise<PaymentRecord[]>;
+  listByTenant(tenantId: string, options?: { sinceIso?: string; limit?: number }): Promise<PaymentRecord[]>;
 }
 
 // ---------- catalog ----------
@@ -101,6 +158,11 @@ export interface ProductRecord {
 }
 
 export interface CatalogPort {
-  findById(id: string): Promise<ProductRecord | null>;
+  /**
+   * Lookup one product. `scope` is REQUIRED (Phase 12): cross-tenant ids resolve
+   * to null without leaking existence, and the adapter pins the tenant GUCs so
+   * the read is RLS-compatible. No unscoped fallback exists by design.
+   */
+  findById(id: string, scope: { organizationId: string }): Promise<ProductRecord | null>;
   listActive(tenantId: string): Promise<ProductRecord[]>;
 }

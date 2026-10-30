@@ -106,9 +106,14 @@ export function assertTenant(actor: Actor, recordTenantId: string): void {
   }
 }
 
-/** Outlet access: owner/finance may access any outlet in tenant; others only granted outlets. */
+/**
+ * Outlet access: owner/finance may access any outlet in the tenant; everyone
+ * else (including `developer`) is limited to their granted outlets. The
+ * `developer` platform role is NOT exempt — it holds no business authority and
+ * must never bypass outlet scoping (separation of duties, Phase A4).
+ */
 export function assertOutlet(actor: Actor, outletId: string): void {
-  if (actor.role === "owner" || actor.role === "finance" || actor.role === "developer") return;
+  if (actor.role === "owner" || actor.role === "finance") return;
   if (!actor.outletIds.includes(outletId)) {
     throw new AppError(ERROR_CODES.OUTLET_MISMATCH, { message: "Outlet access denied" });
   }

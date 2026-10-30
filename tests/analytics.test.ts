@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPeriod, bucketLabels, bucketKey, fallsWithin, type Period } from "@/domain/analytics/periods";
+import { buildPeriod, bucketLabels, fallsWithin } from "@/domain/analytics/periods";
 import { salesSeries, salesSummary, productPerformance, customerAnalytics, inventoryAnalytics, operationalAnalytics } from "@/domain/analytics/aggregations";
 import type { OrderRecord } from "@/domain/shared/ports";
 

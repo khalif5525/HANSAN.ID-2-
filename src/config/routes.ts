@@ -148,6 +148,7 @@ export const WORKSPACE_SECTION_GROUPS: Record<string, WorkspaceSectionGroup[]> =
       sections: [
         { path: "/finance", label: "Overview" },
         { path: "/finance/transactions", label: "Transactions" },
+        { path: "/finance/settlement", label: "Settlement" },
         { path: "/finance/revenue", label: "Revenue" },
         { path: "/finance/expenses", label: "Expenses" },
       ],
@@ -224,6 +225,7 @@ export const WORKSPACE_SECTIONS: Record<string, WorkspaceSection[]> = {
   "/finance": [
     { path: "/finance", label: "Overview" },
     { path: "/finance/transactions", label: "Transactions" },
+    { path: "/finance/settlement", label: "Settlement" },
     { path: "/finance/revenue", label: "Revenue" },
     { path: "/finance/expenses", label: "Expenses" },
     { path: "/finance/refunds", label: "Refunds" },
