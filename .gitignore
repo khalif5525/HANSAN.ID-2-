@@ -37,6 +37,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# local QA screenshots — verification artifacts only, never source (root-anchored)
+/screenshots/
+
 # security / secrets (Phase 2 safety hardening)
 dist/
 *.key
@@ -44,5 +47,14 @@ dist/
 credentials*
 service-account*
 secrets*
+# Phase B1: the server-only secret ACCESSOR is tracked source code, not a
+# secret file — un-ignore this specific module so it is version-controlled.
+!src/server/config/secrets.ts
 .ssh/
 .aws/
+
+# local disposable/scratch artifacts (OA2) — never source. Root-anchored so
+# only repo-root artifacts are excluded; legitimate nested files are unaffected.
+/AppData/
+/tmp_*
+/flaky_run_*.txt

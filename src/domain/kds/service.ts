@@ -17,6 +17,7 @@ import {
   DEFAULT_PRIORITY_THRESHOLDS,
 } from "@/domain/kds/ticket";
 import { transitionOrder, requireOrder, type LifecycleDeps } from "@/domain/pos/lifecycle";
+import type { TenantScope } from "@/domain/shared/tenant-scope";
 
 export type QueueView = "kitchen" | "bar" | "all" | "priority" | "completed";
 
@@ -68,8 +69,8 @@ export class KdsService {
   }
 
   /** Perform a kitchen action (accept/start_prep/mark_ready/complete). */
-  async performAction(orderId: string, action: KdsAction, actorId: string): Promise<OrderRecord> {
-    const order = await requireOrder(this.deps.orders, orderId);
+  async performAction(orderId: string, scope: TenantScope, action: KdsAction, actorId: string): Promise<OrderRecord> {
+    const order = await requireOrder(this.deps.orders, orderId, scope);
     if (!isVisibleToKds(order) && action !== "complete") {
       throw new AppError(ERROR_CODES.INVALID_TICKET_TRANSITION, {
         message: `Order is not active in KDS (state: ${order.state})`,
@@ -88,13 +89,13 @@ export class KdsService {
       }
     }
 
-    return transitionOrder(this.lifecycle, orderId, kdsTargetState(action), actorId);
+    return transitionOrder(this.lifecycle, orderId, scope, kdsTargetState(action), actorId);
   }
 
   /** Item-level prep status update (pending → preparing → ready). */
-  async setItemStatus(orderId: string, lineId: string, to: PrepStatus, actorId: string): Promise<OrderRecord> {
+  async setItemStatus(orderId: string, scope: TenantScope, lineId: string, to: PrepStatus, actorId: string): Promise<OrderRecord> {
     void actorId;
-    const order = await requireOrder(this.deps.orders, orderId);
+    const order = await requireOrder(this.deps.orders, orderId, scope);
     if (!isVisibleToKds(order)) {
       throw new AppError(ERROR_CODES.INVALID_TICKET_TRANSITION, { message: "Order is not active in KDS" });
     }

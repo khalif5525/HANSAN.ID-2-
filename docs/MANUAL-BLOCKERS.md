@@ -9,7 +9,7 @@ Last updated: Phase A1.
 
 1. **Feature:** Production authentication (Supabase Auth + Next.js App Router).
 2. **Why manual:** A real Supabase project must exist; credentials cannot be invented (rules).
-3. **Required:** `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (project URL + anon/public key).
+3. **Required:** `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (project URL + publishable key; the legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` is still accepted as a fallback per `src/config/environment.ts:41`).
 4. **Where:**
    - Locally: `.env.local` in `C:\Users\MyBook Hype AMD\Desktop\HANSAN(2)` (gitignored).
    - Vercel: Project → Settings → Environment Variables (Production + Preview).
@@ -48,7 +48,7 @@ Last updated: Phase A1.
 5. **Dashboard:** Vercel → Project → Settings (env vars) / Deployments (status).
 6. **Provider:** Vercel.
 7. **Security warning:** Do not paste Vercel tokens into the repo. Configure env vars per BLOCKER-001/002 there.
-8. **Continuing without it:** All code phases; pushes still land on GitHub (`main`).
+8. **Continuing without it:** All code phases; pushes land on their branches in GitHub. **CI does not run on pushes** (PR / manual-dispatch events only) — the first CI run happens via PR #1.
 9. **Unlocks:** Automatic deploy per push, production URL verification.
 10. **Verification:** After push, Vercel Deployment shows success; production URL returns 200 on `/` and `/login`.
 11. **Status:** ⬜ OPEN (vercel CLI installed but unauthenticated; `.vercel/` not linked).

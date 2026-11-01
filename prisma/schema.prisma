@@ -1,0 +1,541 @@
+// HANSAN — tenant-aware production schema (Phase 2, Production Readiness Autopilot).
+//
+// Design rules (non-negotiables):
+//   * Every business row carries organizationId (+ outletId where meaningful).
+//   * Money: BigInt = whole Indonesian Rupiah (integer minor-unit, scale 0).
+//     NEVER Float/Double for financial values; domain arithmetic stays integer
+//     (src/domain/shared/money.ts) and adapters convert bigint->number only < 2^53.
+//   * Quantities: Decimal(14,3) with an explicit unit enum — grams/milliliters
+//     are never implicit.
+//   * dataScope: demo rows can never mix into production ledgers; finance and
+//     settlement queries always filter dataScope = PRODUCTION (adapters + RLS artifact).
+//   * Production starts EMPTY — this schema seeds nothing, ever.
+//   * Station tickets are NOT a table: they are derived from OrderItem.station
+//     + prepStatus at read time (single source of truth: src/domain/kds/ticket.ts).
+//   * Migrations are additive/non-destructive by default; no destructive SQL
+//     without explicit approval.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Runtime: Supabase transaction pooler (port 6543) — serverless-safe.
+  url       = env("DATABASE_URL")
+  // Migrations/admin: Supabase direct/session connection (port 5432).
+  // Prisma uses this for `migrate` so advisory locks and DDL never contend
+  // with the pooler. Same database as DATABASE_URL — not a different target.
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & identity
+// ---------------------------------------------------------------------------
+
+/// Demo/production separation at the root: a DEMO organization's rows can
+/// never appear in production reports because scoped queries join through
+/// Organization.dataScope (enforced in adapters; see prisma/rls-demo-isolation.sql).
+enum DataScope {
+  PRODUCTION
+  DEMO
+}
+
+model Organization {
+  id        String    @id // domain id, e.g. "ten_..."
+  name      String
+  slug      String    @unique
+  dataScope DataScope @default(PRODUCTION)
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  outlets           Outlet[]
+  memberships       Membership[]
+  menuCategories    MenuCategory[]
+  menuItems         MenuItem[]
+  ingredients       Ingredient[]
+  movements         InventoryMovement[]
+  orders            Order[]
+  idempotency       IdempotencyRecord[]
+  payments          Payment[]
+  refunds           Refund[]
+  settlementBatches SettlementBatch[]
+  approvals         Approval[]
+  reservations      Reservation[]
+}
+
+model Outlet {
+  id             String   @id // "out_..."
+  organizationId String
+  name           String
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  memberships  Membership[]
+  orders       Order[]
+  counters     SequenceCounter[]
+  payments     Payment[]
+  refunds      Refund[]
+  batches      SettlementBatch[]
+  reservations Reservation[]
+
+  @@index([organizationId])
+}
+
+/// Application user. `authSubject` mirrors the external auth provider id
+/// (Supabase Auth `sub`) once BLOCKER-001 is configured; it stays nullable
+/// so the interim signed-cookie demo session can reference a demo user row.
+model User {
+  id          String   @id // "usr_..."
+  authSubject String?  @unique
+  email       String   @unique
+  displayName String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  memberships Membership[]
+  auditEvents AuditEvent[] @relation("AuditActor")
+
+  @@index([authSubject])
+}
+
+/// Role assignment: a user's role WITHIN one organization (server-side RBAC
+/// source of truth; mirrors src/domain/authz/rbac.ts DevRole values).
+/// The platform `developer` role is intentionally NOT a membership — platform
+/// administration is never business authority (rbac.ts separation).
+enum OrgRole {
+  OWNER
+  POS
+  KDS
+  FINANCE
+}
+
+model Membership {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  outletId       String? // null = every outlet of the organization
+  role           OrgRole
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  user         User         @relation(fields: [userId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  outlet       Outlet?      @relation(fields: [outletId], references: [id])
+
+  @@unique([userId, organizationId, role, outletId])
+  @@index([organizationId, role])
+}
+
+// ---------------------------------------------------------------------------
+// Catalog & recipes
+// ---------------------------------------------------------------------------
+
+enum Station {
+  KITCHEN
+  BAR
+}
+
+model MenuCategory {
+  id             String  @id
+  organizationId String
+  name           String
+  sortOrder      Int     @default(0)
+  active         Boolean @default(true)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  items        MenuItem[]
+
+  @@index([organizationId])
+}
+
+model MenuItem {
+  id             String   @id // domain ProductRecord id
+  organizationId String
+  categoryId     String
+  name           String
+  /// Whole rupiah, integer only (never float).
+  priceIdr       BigInt
+  station        Station // explicit routing — never inferred from the name
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  category     MenuCategory @relation(fields: [categoryId], references: [id])
+  recipe       Recipe?
+
+  @@index([organizationId, active])
+}
+
+enum UnitCode {
+  g
+  kg
+  ml
+  l
+  pc
+}
+
+model Ingredient {
+  id                String    @id
+  organizationId    String
+  name              String
+  unit              UnitCode
+  /// Live stock balance in `unit` (decimal, 3 dp).
+  quantity          Decimal   @db.Decimal(14, 3)
+  lowStockThreshold Decimal   @default(0) @db.Decimal(14, 3)
+  expiryDate        DateTime?
+  updatedAt         DateTime  @default(now())
+
+  organization Organization        @relation(fields: [organizationId], references: [id])
+  recipeItems  RecipeItem[]
+  movements    InventoryMovement[]
+
+  @@index([organizationId])
+}
+
+/// One recipe per menu item: ingredients + explicit quantities/units.
+model Recipe {
+  id         String   @id @default(cuid())
+  menuItemId String   @unique
+  yieldQty   Decimal  @default(1) @db.Decimal(14, 3)
+  yieldUnit  UnitCode @default(pc)
+
+  menuItem MenuItem     @relation(fields: [menuItemId], references: [id])
+  items    RecipeItem[]
+}
+
+model RecipeItem {
+  id           String  @id @default(cuid())
+  recipeId     String
+  ingredientId String
+  /// Amount expressed in the ingredient's own unit; conversion happens in
+  /// domain (src/domain/inventory/units.ts) — never silently here.
+  quantity     Decimal @db.Decimal(14, 3)
+
+  recipe     Recipe     @relation(fields: [recipeId], references: [id])
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id])
+
+  @@unique([recipeId, ingredientId])
+}
+
+enum MovementType {
+  purchase_receipt
+  recipe_deduction
+  adjustment
+  opname
+  waste
+  return_stock // "return" is a reserved word; domain maps "return" -> return_stock
+}
+
+/// Append-only stock ledger. `quantityAfter` is written by the transactional
+/// adapter and doubles as an optimistic-concurrency check (InventoryPort contract).
+model InventoryMovement {
+  id             String       @id // "mov_..."
+  organizationId String
+  ingredientId   String
+  type           MovementType
+  quantityDelta  Decimal      @db.Decimal(14, 3)
+  quantityAfter  Decimal      @db.Decimal(14, 3)
+  reason         String
+  actorId        String
+  occurredAt     DateTime
+
+  ingredient   Ingredient   @relation(fields: [ingredientId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([ingredientId, occurredAt])
+  @@index([organizationId, occurredAt])
+}
+
+// ---------------------------------------------------------------------------
+// Orders (POS → KDS → Finance single source of truth)
+// ---------------------------------------------------------------------------
+
+enum OrderState {
+  draft
+  placed
+  accepted
+  preparing
+  ready
+  completed
+  cancelled
+  refund_requested
+  refunded
+}
+
+enum PaymentState {
+  unpaid
+  paid
+  refunding
+  refunded
+}
+
+enum OrderType {
+  dine_in
+  take_away
+  online
+}
+
+enum PrepStatus {
+  pending
+  preparing
+  ready
+}
+
+/// Parent order. Totals are server-computed at write time from integer
+/// arithmetic; they are a cache of the OrderItem sum, never independent input.
+model Order {
+  id             String       @id // "ord_..."
+  organizationId String
+  outletId       String
+  dataScope      DataScope    @default(PRODUCTION)
+  orderNumber    String
+  orderType      OrderType
+  tableId        String?
+  customerId     String?
+  subtotalIdr    BigInt
+  discountIdr    BigInt       @default(0)
+  taxIdr         BigInt       @default(0)
+  grandTotalIdr  BigInt
+  state          OrderState   @default(placed)
+  paymentState   PaymentState @default(unpaid)
+  createdBy      String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  outlet       Outlet       @relation(fields: [outletId], references: [id])
+  items        OrderItem[]
+  payments     Payment[]
+  refunds      Refund[]
+
+  @@unique([outletId, orderNumber]) // stable human number per outlet
+  @@index([organizationId, outletId, createdAt])
+  @@index([organizationId, state])
+}
+
+/// Order line = one station-routed item. Station progress lives HERE
+/// (prepStatus per line); KDS tickets and checker aggregates are derived reads.
+model OrderItem {
+  id           String     @id // "item_..."
+  orderId      String
+  productId    String
+  productName  String // snapshot at sale time — catalog renames never rewrite history
+  quantity     Int
+  /// Whole-rupiah snapshot; creation re-derives and validates against MenuItem.
+  unitPriceIdr BigInt
+  station      Station
+  lineState    String     @default("active") // active | cancelled (OrderLine.state)
+  prepStatus   PrepStatus @default(pending)
+  note         String?
+  modifierIds  String[]   @default([])
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+/// Monotonic per-outlet counters (order numbers) — incremented inside the
+/// same transaction that creates the order so numbers never collide.
+model SequenceCounter {
+  outletId String
+  kind     String // e.g. "order_number"
+  value    BigInt @default(0)
+
+  outlet Outlet @relation(fields: [outletId], references: [id])
+
+  @@id([outletId, kind])
+}
+
+/// Replay protection for POST /api/orders (and future unsafe operations):
+/// a retry with the same key returns the original result instead of
+/// creating a duplicate order.
+model IdempotencyRecord {
+  id             String   @id @default(cuid())
+  organizationId String
+  scope          String // e.g. "orders.create"
+  key            String // client-supplied Idempotency-Key header
+  requestHash    String // sha256 of the canonical request body
+  status         String // in_progress | completed | failed
+  responseJson   String? // serialized result for completed replays
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, scope, key])
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Payments, refunds, settlement, approvals, audit
+// ---------------------------------------------------------------------------
+
+enum PayMethod {
+  cash
+  qris
+  card
+  transfer
+}
+
+/// One row per capture against an order. Finance totals are SUMS over these
+/// rows — never typed in. Provider fields stay null until a gateway exists
+/// (BLOCKER-005); no automatic reconciliation is claimed before then.
+model Payment {
+  id                String    @id // domain payment id
+  organizationId    String
+  outletId          String
+  orderId           String
+  dataScope         DataScope @default(PRODUCTION)
+  amountIdr         BigInt // whole rupiah, integer
+  method            PayMethod
+  capturedBy        String
+  capturedAt        DateTime  @default(now())
+  externalRef       String? // provider reference once a gateway is wired
+  settlementBatchId String?
+
+  organization    Organization     @relation(fields: [organizationId], references: [id])
+  outlet          Outlet           @relation(fields: [outletId], references: [id])
+  order           Order            @relation(fields: [orderId], references: [id])
+  settlementBatch SettlementBatch? @relation(fields: [settlementBatchId], references: [id])
+
+  @@index([organizationId, outletId, capturedAt])
+  @@index([orderId])
+}
+
+enum RefundStatus {
+  pending
+  approved
+  rejected
+  completed
+}
+
+/// Refunds remain cash-only per the approved rule set (src/domain/finance/rules.ts).
+/// Separation of duties (decidedBy !== requestedBy) is enforced in domain + API.
+model Refund {
+  id             String       @id // "ref_..."
+  organizationId String
+  outletId       String
+  orderId        String
+  dataScope      DataScope    @default(PRODUCTION)
+  amountIdr      BigInt
+  reason         String
+  status         RefundStatus @default(pending)
+  requestedBy    String
+  decidedBy      String?
+  decidedAt      DateTime?
+  createdAt      DateTime     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  outlet       Outlet       @relation(fields: [outletId], references: [id])
+  order        Order        @relation(fields: [orderId], references: [id])
+
+  @@index([organizationId, status])
+  @@index([orderId])
+}
+
+enum SettlementStatus {
+  open
+  closed
+  approved
+  rejected
+}
+
+/// A settlement batch GROUPS captured payments for reconciliation.
+/// `totalAmountIdr` is written by the close routine as the sum of its member
+/// payments inside one transaction; approval identity is always recorded.
+model SettlementBatch {
+  id             String           @id @default(cuid())
+  organizationId String
+  outletId       String
+  dataScope      DataScope        @default(PRODUCTION)
+  batchNumber    String
+  status         SettlementStatus @default(open)
+  totalAmountIdr BigInt           @default(0)
+  openedBy       String
+  openedAt       DateTime         @default(now())
+  closedBy       String?
+  closedAt       DateTime?
+  approvedBy     String?
+  approvedAt     DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  outlet       Outlet       @relation(fields: [outletId], references: [id])
+  payments     Payment[]
+
+  @@unique([outletId, batchNumber])
+  @@index([organizationId, status])
+}
+
+/// Generic approval trail — who approved what, when (not just final state).
+/// Refund / settlement / stock-adjustment decisions append here.
+model Approval {
+  id             String   @id @default(cuid())
+  organizationId String
+  entityType     String // refund | settlement_batch | stock_adjustment | ...
+  entityId       String
+  decision       String // approved | rejected
+  decidedBy      String
+  comment        String?
+  decidedAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, entityType, entityId])
+}
+
+/// Append-only audit log (mirrors src/domain/audit/events.ts AuditEvent).
+/// metadata is scalar-only JSON — never secrets, tokens, or PII blobs.
+model AuditEvent {
+  id             String   @id // "aud_..."
+  action         String
+  actorId        String
+  actorRole      String
+  entityType     String
+  entityId       String
+  organizationId String?
+  outletId       String?
+  occurredAt     DateTime
+  metadata       Json?
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([occurredAt])
+  @@index([organizationId, occurredAt])
+  @@index([entityType, entityId])
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  EXPIRED
+  COMPLETED
+}
+
+model Reservation {
+  id              String            @id // "rsv_..."
+  organizationId  String
+  outletId        String
+  dataScope       DataScope         @default(PRODUCTION)
+  customerName    String
+  customerEmail   String
+  customerPhone   String
+  partySize       Int
+  reservationAt   DateTime
+  durationMinutes Int               @default(60)
+  status          ReservationStatus @default(CONFIRMED)
+  tableId         String?
+  area            String?
+  notes           String?
+  createdBy       String
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  outlet       Outlet       @relation(fields: [outletId], references: [id])
+
+  @@index([organizationId, outletId, reservationAt])
+  @@index([outletId, status, reservationAt])
+}

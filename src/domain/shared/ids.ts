@@ -16,7 +16,9 @@ export type EntityPrefix =
   | "adj"
   | "exp"
   | "ref"
+  | "pay"
   | "usr"
+  | "ten"
   | "out"
   | "aud"
   | "vch";

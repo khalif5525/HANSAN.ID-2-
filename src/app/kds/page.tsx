@@ -3,10 +3,12 @@ import { ModulePage } from "@/components/shared/module-page";
 import { Section } from "@/components/ui/section";
 import { StatStrip } from "@/components/ui/stat-strip";
 import { Badge } from "@/components/ui/badge";
+import { StationTicketBoard } from "@/components/modules/kds/ticket-board";
 
 /**
- * KDS — Kitchen view (Phase 10). Station-first triage: live counts,
- * lifecycle legend, and station switcher. Initial state: NO active orders.
+ * KDS — Kitchen view. Station board renders Kitchen tickets only
+ * (pre-split by buildTickets); with no backend orders it shows the
+ * honest empty state. Bar items never appear here.
  */
 export default function KdsKitchenPage() {
   return (
@@ -29,6 +31,15 @@ export default function KdsKitchenPage() {
             { label: "Ready", value: "0", hint: "Awaiting pickup" },
             { label: "Oldest wait", value: "—", hint: "No tickets queued" },
           ]}
+        />
+      </Section>
+
+      <Section eyebrow="Kitchen" title="Kitchen tickets" description="Food line only — Bar items route to the Bar board.">
+        <StationTicketBoard
+          station="kitchen"
+          tickets={[]}
+          emptyTitle="Kitchen queue is empty"
+          emptyDescription="Food tickets from real POS orders will fire here. Nothing is simulated — the board stays empty until the backend phase."
         />
       </Section>
 

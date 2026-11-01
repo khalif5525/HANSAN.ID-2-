@@ -2,8 +2,10 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { DevRole } from "@/types/roles";
 import { DEV_ACCOUNTS } from "@/types/roles";
+import { clearDevSession } from "@/lib/dev-session";
 import { Avatar } from "@/components/ui/avatar";
 import { IconButton } from "@/components/ui/icon-button";
 
@@ -19,11 +21,24 @@ export interface HeaderProps {
 }
 
 /**
- * App header — brand, workspace context, dev session identity.
- * Dev-only sign-out link goes to /login (real auth arrives post-freeze).
+ * App header — brand, workspace context, session identity.
+ * Sign-out clears the localStorage mirror AND the signed server cookie
+ * (Phase 3), then returns to /login.
  */
 export function Header({ role, contextLabel, onToggleMenu, onToggleSidebar, notifications = 0 }: HeaderProps) {
+  const router = useRouter();
   const account = DEV_ACCOUNTS[role];
+
+  async function signOut(e: React.MouseEvent) {
+    e.preventDefault();
+    try {
+      await fetch("/api/auth/signout", { method: "POST", keepalive: true });
+    } catch {
+      /* cookie may already be absent — local clear still runs */
+    }
+    clearDevSession();
+    router.replace("/login");
+  }
   return (
     <header className="flex h-[var(--shell-header-h)] shrink-0 items-center gap-3 border-b-2 border-hansan-ink bg-hansan-surface-soft px-4">
       {onToggleMenu && (
@@ -57,6 +72,7 @@ export function Header({ role, contextLabel, onToggleMenu, onToggleSidebar, noti
         </IconButton>
         <Link
           href="/login"
+          onClick={signOut}
           className="flex items-center gap-2 rounded-xl px-2 py-1.5 transition hover:bg-hansan-surface"
         >
           <Avatar initials={account.label} size="sm" />

@@ -34,20 +34,30 @@
   --hansan-danger: #b3271e;
   --hansan-info: #0029ff;
 
-  /* Elevation — flat-first system. Reserved uses:
-     raised-sm: primary buttons + active nav only.
+  /* Elevation — approved hybrid (ORBIT buttons + SleepWise cards +
+     flat-first operations).
+     orbit: crisp hard bottom-right offset for ORBIT buttons
+       (2px ink outline + hard offset, zero blur).
+     sleepwise: crisp offset shadow for prominent cards.
      raised: dialogs, drawers, login panel, floating POS cart only.
+     raised-sm: legacy soft shadow (kept for compatibility).
      inset: text inputs / search / pressed states.
      flat: hairline-separated content (tables, lists, info sections). */
+  --orbit-shadow: 5px 5px 0 var(--hansan-ink);
+  --orbit-shadow-sm: 3px 3px 0 var(--hansan-ink);
+  --sleepwise-shadow: 6px 6px 0 var(--hansan-ink);
   --neu-raised: 0 12px 32px rgba(28, 26, 21, 0.14);
   --neu-raised-sm: 0 2px 8px rgba(28, 26, 21, 0.12);
   --neu-inset: inset 0 1px 2px rgba(28, 26, 21, 0.08);
   --neu-flat: 0 1px 0 rgba(28, 26, 21, 0.06);
 
-  /* Radius — disciplined, rectangular operational feel */
+  /* Radius — ORBIT-informed operational feel.
+     Operational surfaces stay rectangular (sm/xs); buttons use the
+     ORBIT radius (13–15px) via --radius-orbit. */
   --radius-neu: 0.75rem;
   --radius-sm: 0.375rem;
   --radius-xs: 0.25rem;
+  --radius-orbit: 14px;
   --radius-full: 9999px;
 
   /* Section rhythm (ORBIT-informed editorial spacing) */

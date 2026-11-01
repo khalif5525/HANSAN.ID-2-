@@ -74,4 +74,6 @@ export const RATE_LIMITS = {
   api: { limit: 120, windowMs: 60_000 },
   /** Expensive mutations. */
   mutation: { limit: 30, windowMs: 60_000 },
+  /** Order creation (customer-facing). */
+  order_create: { limit: 30, windowMs: 60_000 },
 } as const;

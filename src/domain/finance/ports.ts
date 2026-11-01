@@ -29,7 +29,29 @@ export interface RefundRecord {
 export interface FinancePort {
   saveExpense(e: ExpenseRecord): Promise<void>;
   listExpenses(tenantId: string, sinceIso?: string): Promise<ExpenseRecord[]>;
-  getRefund(id: string): Promise<RefundRecord | null>;
+  /** Tenant-scoped read: organizationId is server-derived, never from the client. */
+  getRefund(id: string, organizationId: string): Promise<RefundRecord | null>;
   saveRefund(r: RefundRecord): Promise<void>;
   listRefunds(tenantId: string): Promise<RefundRecord[]>;
+  /** Atomic conditional transition: only succeeds if the refund is still in `expectedStatus` and belongs to `organizationId`. */
+  transitionRefund(params: {
+    id: string;
+    organizationId: string;
+    expectedStatus: RefundRecord["status"];
+    patch: Partial<Pick<RefundRecord, "status" | "decidedBy" | "decidedAt">>;
+  }): Promise<RefundRecord | null>;
+  /**
+   * Atomically applies a conditional refund state transition and records the
+   * corresponding audit event in a single database transaction (production).
+   * Demo implementation performs both sequentially (single-process, audit sink
+   * never throws). Returns null if the conditional update does not match
+   * (concurrent modification or already-decided refund) — in that case no audit
+   * event is recorded.
+   */
+  transitionRefundWithAudit(params: {
+    id: string;
+    organizationId: string;
+    expectedStatus: RefundRecord["status"];
+    patch: Partial<Pick<RefundRecord, "status" | "decidedBy" | "decidedAt">>;
+  }, auditEvent: { id: string; action: string; actorId: string; actorRole: string; entityType: string; entityId: string; tenantId: string; outletId: string; occurredAt: string; metadata?: Record<string, string | number | boolean> }): Promise<RefundRecord | null>;
 }

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { rateLimit, InMemoryRateLimitStore, RATE_LIMITS } from "@/server/rate-limit";
-import { ERROR_CODES } from "@/domain/shared/errors";
 
 describe("rate limiter", () => {
   it("respects store and returns retry-after ceiling", () => {

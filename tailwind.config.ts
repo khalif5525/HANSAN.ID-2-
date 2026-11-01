@@ -42,13 +42,18 @@ const config: Config = {
         neu: "var(--radius-neu)",
         sm: "var(--radius-sm)",
         xs: "var(--radius-xs)",
+        orbit: "var(--radius-orbit)",
       },
       boxShadow: {
-        // Flat-first operational system (HANSAN-UI-UX-DESIGN-DIRECTION.md).
-        // raised-sm: primary buttons + active nav only.
+        // Approved hybrid (master autopilot visual contract).
+        // orbit: ORBIT buttons — hard bottom-right offset, zero blur.
+        // sleepwise: prominent cards — crisp offset.
         // raised: dialogs, drawers, login panel, floating POS cart only.
         // inset: text inputs / search / pressed states.
         // flat: hairline rule for dense tables / lists.
+        orbit: "var(--orbit-shadow)",
+        "orbit-sm": "var(--orbit-shadow-sm)",
+        sleepwise: "var(--sleepwise-shadow)",
         "neu-raised": "var(--neu-raised)",
         "neu-raised-sm": "var(--neu-raised-sm)",
         "neu-inset": "var(--neu-inset)",

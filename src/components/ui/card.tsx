@@ -1,6 +1,6 @@
 import * as React from "react";
 
-export type CardElevation = "raised" | "flat";
+export type CardElevation = "raised" | "flat" | "sleepwise";
 
 export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   elevation?: CardElevation;
@@ -15,9 +15,11 @@ const PADDING_CLASS = {
 } as const;
 
 /**
- * Card primitive — flat-first operational surfaces (§10 + design direction).
- * raised: dialogs, login panel, floating summaries only.
- * flat (default): bordered white surfaces for lists, tables, info sections.
+ * Card primitive — approved SleepWise treatment for prominent cards.
+ * flat (default): bordered white operational surfaces.
+ * sleepwise: warm ivory surface + 2px ink outline + crisp offset shadow
+ *   for prominent dashboard cards. Use sparingly — never nested.
+ * raised: legacy soft shadow for dialogs/login/floating summaries only.
  */
 export function Card({
   elevation = "flat",
@@ -27,9 +29,11 @@ export function Card({
   ...rest
 }: CardProps) {
   const elevationClass =
-    elevation === "raised"
-      ? "bg-hansan-surface-soft shadow-neu-raised"
-      : "border border-hansan-line bg-hansan-surface-raised";
+    elevation === "sleepwise"
+      ? "border-2 border-hansan-ink bg-hansan-ivory shadow-sleepwise"
+      : elevation === "raised"
+        ? "border border-hansan-line bg-hansan-surface-soft shadow-neu-raised"
+        : "border border-hansan-line bg-hansan-surface-raised";
   return (
     <div
       className={`rounded-neu ${elevationClass} ${PADDING_CLASS[padding]} ${className}`.trim()}

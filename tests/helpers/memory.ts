@@ -4,7 +4,7 @@
  * fabricate records — they start EMPTY like a real fresh database.
  */
 import type { CatalogPort, OrderPort, OrderRecord, ProductRecord, UserRecord } from "@/domain/shared/ports";
-import type { CustomerPort, CustomerRecord, ReservationPort, ReservationRecord, TablePort, TableRecord } from "@/domain/customers/ports";
+import type { CustomerPort, CustomerRecord, ReservationPort, ReservationRecord } from "@/domain/customers/ports";
 import type { AuditEvent, AuditLogPort } from "@/domain/audit/events";
 import type {
   FinancePort,
@@ -29,8 +29,12 @@ export class MemoryOrders implements OrderPort {
   rows = new Map<string, OrderRecord>();
   private counters = new Map<string, number>();
 
-  async findById(id: string): Promise<OrderRecord | null> {
-    return this.rows.get(id) ?? null;
+  async findById(id: string, scope: { organizationId: string; outletId?: string }): Promise<OrderRecord | null> {
+    const row = this.rows.get(id) ?? null;
+    if (!row) return null;
+    if (row.tenantId !== scope.organizationId) return null;
+    if (scope.outletId && row.outletId !== scope.outletId) return null;
+    return row;
   }
   async save(order: OrderRecord): Promise<void> {
     this.rows.set(order.id, { ...order, lines: order.lines.map((l) => ({ ...l })) });
@@ -61,16 +65,23 @@ export class MemoryOrders implements OrderPort {
 
 export class MemoryCatalog implements CatalogPort {
   rows = new Map<string, ProductRecord>();
-  async findById(id: string): Promise<ProductRecord | null> {
-    return this.rows.get(id) ?? null;
+  async findById(id: string, scope: { organizationId: string }): Promise<ProductRecord | null> {
+    const row = this.rows.get(id) ?? null;
+    if (!row) return null;
+    if (row.tenantId !== scope.organizationId) return null;
+    return row;
   }
   async listActive(tenantId: string): Promise<ProductRecord[]> {
     return Array.from(this.rows.values()).filter((p) => p.tenantId === tenantId && p.active);
+  }
+  async put(product: ProductRecord): Promise<void> {
+    this.rows.set(product.id, product);
   }
 }
 
 export class MemoryFinance implements FinancePort {
   expenses: ExpenseRecord[] = [];
+  events: AuditEvent[] = [];
   refunds = new Map<string, RefundRecord>();
   async saveExpense(e: ExpenseRecord): Promise<void> {
     this.expenses.push({ ...e });
@@ -78,11 +89,47 @@ export class MemoryFinance implements FinancePort {
   async listExpenses(tenantId: string, sinceIso?: string): Promise<ExpenseRecord[]> {
     return this.expenses.filter((e) => e.tenantId === tenantId && (!sinceIso || e.incurredAt >= sinceIso));
   }
-  async getRefund(id: string): Promise<RefundRecord | null> {
-    return this.refunds.get(id) ?? null;
+  async getRefund(id: string, organizationId: string): Promise<RefundRecord | null> {
+    const current = this.refunds.get(id) ?? null;
+    if (!current || current.tenantId !== organizationId) return null;
+    return current;
   }
   async saveRefund(r: RefundRecord): Promise<void> {
     this.refunds.set(r.id, { ...r });
+  }
+  async transitionRefund(params: {
+    id: string;
+    organizationId: string;
+    expectedStatus: RefundRecord["status"];
+    patch: Partial<Pick<RefundRecord, "status" | "decidedBy" | "decidedAt">>;
+  }): Promise<RefundRecord | null> {
+    const current = this.refunds.get(params.id) ?? null;
+    if (!current || current.tenantId !== params.organizationId || current.status !== params.expectedStatus) return null;
+    const updated: RefundRecord = { ...current, ...params.patch };
+    this.refunds.set(updated.id, updated);
+    return updated;
+  }
+  async transitionRefundWithAudit(params: {
+    id: string;
+    organizationId: string;
+    expectedStatus: RefundRecord["status"];
+    patch: Partial<Pick<RefundRecord, "status" | "decidedBy" | "decidedAt">>;
+  }, auditEvent: {
+    id: string;
+    action: string;
+    actorId: string;
+    actorRole: string;
+    entityType: string;
+    entityId: string;
+    tenantId: string;
+    outletId: string;
+    occurredAt: string;
+    metadata?: Record<string, string | number | boolean>;
+  }): Promise<RefundRecord | null> {
+    const updated = await this.transitionRefund(params);
+    if (!updated) return null;
+    this.events.push(auditEvent as AuditEvent);
+    return updated;
   }
   async listRefunds(tenantId: string): Promise<RefundRecord[]> {
     return Array.from(this.refunds.values()).filter((r) => r.tenantId === tenantId);

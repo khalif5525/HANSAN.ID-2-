@@ -1,0 +1,91 @@
+# ============================================================================
+# HANSAN — CI pull-request gate (active on PRs to main; read-only token, no secrets)
+# ============================================================================
+# Repository policy (§25/§26): CI workflows are infrastructure on the owner's
+# explicit list, not an autonomous auditor. This file started as a MINIMAL,
+# REVIEWABLE draft in Phase 16; the owner later pushed it with PR #1 (run #1,
+# Oct 15 2026), so the gate is now ACTIVE — it still consumes no secrets.
+#
+# What this file DOES:
+#   1. Installs dependencies from the lockfile (npm ci — reproducible).
+#   2. TypeScript typecheck (tsc --noEmit).
+#   3. ESLint (next lint).
+#   4. Unit tests (vitest).
+#   5. Prisma DB schema validation (prisma validate — schema-only, NO live DB).
+#   6. Production build (next build).
+#
+# What this file DOES NOT:
+#   - Add, consume, or require repository secrets. No SUPABASE_SECRET_KEY or
+#     SESSION_SECRET is needed, and no real database credentials or remote
+#     database connection are required. The only DATABASE_URL/DIRECT_URL below
+#     are dummy, non-routable localhost placeholders scoped to the db:validate
+#     step; prisma validate checks schema/configuration only and never opens a
+#     database connection.
+#   - Enable itself or auto-merge. It is a stub for review; enabling is an
+#     owner decision after this phase's checks are observed green.
+#   - Trigger any deployment, migration, RLS activation, or DB write.
+#
+# Node requirement: the repo declares no "engines" and is pinned to Next.js
+# 14.2.35, whose supported LTS lines are Node 18/20/22. CI pins Node 22 —
+# also the minimum required by @supabase/supabase-js (engines: node >=22).
+# The developer machine currently runs Node 24 (satisfies runtime); CI uses
+# the pinned 22 LTS image so the gate does not drift from the recorded tooling.
+# ============================================================================
+
+name: CI — Pull Request Gate
+
+on:
+  pull_request:
+    branches: [main]
+  # Manual re-run only. Takes NO inputs: never paste connection strings or
+  # secrets into dispatch inputs — they are recorded in workflow-run metadata.
+  workflow_dispatch:
+
+# Least-privilege default token: this gate only reads the repository.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # Fail safely: GitHub Actions terminates at the first failing step.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22 (LTS; required by @supabase/supabase-js >=22)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies (lockfile)
+        run: npm ci
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+        # Default lane excludes tests/pg-live-*.test.ts (fail-closed live-PG
+        # suites). Those require an authorized disposable local database and are
+        # run via `npm run test:live-pg` outside CI; do not treat their absence
+        # as passed live-PG coverage.
+
+      - name: Prisma DB schema validation (schema-only, no DB)
+        run: npm run db:validate
+        # NON-SECRET, non-routable dummy placeholders (localhost only). `prisma
+        # validate` only checks that the datasource URLs are syntactically valid —
+        # it does NOT open a database connection. They exist only because
+        # prisma/schema.prisma references env("DATABASE_URL")/env("DIRECT_URL")
+        # and a clean CI runner has no .env. Scoped to THIS step only; no repo
+        # secret, no job/workflow env, no network/DB/migration step is added.
+        env:
+          DATABASE_URL: "postgresql://user:pass@localhost:5432/hansan"
+          DIRECT_URL: "postgresql://user:pass@localhost:5432/hansan"
+
+      - name: Production build
+        run: npm run build

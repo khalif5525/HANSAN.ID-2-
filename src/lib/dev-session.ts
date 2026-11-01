@@ -19,6 +19,11 @@ const DEV_PASSWORDS: Record<DevRole, string> = {
   finance: "finance-hansan",
 };
 
+/** Demo shortcut credentials (already shipped in this client bundle by design). */
+export function devCredentialsFor(role: DevRole): { email: string; password: string } {
+  return { email: DEV_ACCOUNTS[role].email, password: DEV_PASSWORDS[role] };
+}
+
 const SESSION_KEY = "hansan.dev.session.v1";
 
 export interface DevSession {

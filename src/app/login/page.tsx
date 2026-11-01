@@ -4,16 +4,22 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { DEV_ACCOUNTS, DEV_ROLES } from "@/types/roles";
-import { verifyDevCredentials, writeDevSession } from "@/lib/dev-session";
+import { devCredentialsFor, verifyDevCredentials, writeDevSession } from "@/lib/dev-session";
 import { homeForRole } from "@/config/routes";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 
 /**
- * Development sign-in (Phase 7) — LOCAL-ONLY role simulation.
- * No backend, no API, no database, no real authentication.
- * Credentials live in `src/lib/dev-session.ts` (dev environment only).
+ * Sign-in (Phase 3) — issues the interim signed demo session cookie via
+ * POST /api/auth/sign-in, then mirrors identity to localStorage for the
+ * existing client gate (presentation only).
+ *
+ * Continuity guarantee: if the server cannot sign (production deployment
+ * without SESSION_SECRET), sign-in falls back to local verification so the
+ * owner demo workflow is NEVER locked — server APIs remain fail-closed and
+ * no server identity exists in that state (honest, documented in
+ * docs/PRODUCTION-READINESS.md). Supabase Auth (BLOCKER-001) replaces this.
  */
 export default function LoginPage() {
   const router = useRouter();
@@ -22,25 +28,57 @@ export default function LoginPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
 
-  function onSubmit(e: React.FormEvent) {
+  async function establishSession(creds: { email: string; password: string }): Promise<boolean | null> {
+    try {
+      const res = await fetch("/api/auth/sign-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(creds),
+      });
+      const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: { code?: string } } | null;
+      if (res.ok && json?.ok) return true;
+      // Wrong credentials on the server = real rejection.
+      if (res.status === 401) return false;
+      // 503 AUTH_NOT_CONFIGURED / network failure -> local fallback (demo continuity).
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function finishSignIn(role: (typeof DEV_ROLES)[number]) {
+    writeDevSession(role);
+    router.replace(homeForRole(role));
+  }
+
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
-    const role = verifyDevCredentials(email, password);
-    if (!role) {
+
+    const localRole = verifyDevCredentials(email, password);
+    if (!localRole) {
       setSubmitting(false);
       setError(
         "Unknown development account. Use one of the five development sign-ins listed below.",
       );
       return;
     }
-    writeDevSession(role);
-    router.replace(homeForRole(role));
+
+    const server = await establishSession({ email, password });
+    if (server === false) {
+      setSubmitting(false);
+      setError("Sign-in rejected by the server. Check the development account and try again.");
+      return;
+    }
+    await finishSignIn(localRole);
   }
 
-  function quickSignIn(role: (typeof DEV_ROLES)[number]) {
-    writeDevSession(role);
-    router.replace(homeForRole(role));
+  async function quickSignIn(role: (typeof DEV_ROLES)[number]) {
+    setSubmitting(true);
+    setError(null);
+    await establishSession(devCredentialsFor(role));
+    await finishSignIn(role);
   }
 
   return (
@@ -56,8 +94,9 @@ export default function LoginPage() {
         <section className="rounded-sm border border-hansan-line bg-hansan-surface-raised p-6 sm:p-8">
           <h1 className="text-xl font-bold text-hansan-ink">Development sign-in</h1>
           <p className="mt-1.5 text-sm text-hansan-ink-muted">
-            Local-only role simulation for the UI/UX sprint. No real authentication —
-            sessions are stored in this browser only.
+            Demo sandbox access for exploring HANSAN. Sign-in issues a signed demo session
+            cookie (server-verified); this is not production authentication — real accounts
+            arrive with Supabase Auth.
           </p>
 
           <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
